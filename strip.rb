@@ -2,6 +2,7 @@
 # coding: utf-8
 
 require 'pp'
+require 'getoptlong'
 
 class Screen
   def initialize
@@ -543,18 +544,43 @@ module Sequence
   end
 end
 
+def parse_option
+  option = {}
+
+  parser = GetoptLong.new
+  parser.set_options(['-i', GetoptLong::REQUIRED_ARGUMENT])
+  parser.each_option do |name, arg|
+    case name
+    when '-i'
+      option[:extension] = arg
+    end
+  end
+  return option
+end
+
 def main
-  if ARGV.empty?
+  option = parse_option
+  inputfile = ARGV[0]
+  out = STDOUT
+
+  if inputfile.nil?
     STDIN.binmode
     bytes = STDIN.read
   else
-    bytes = File.binread(ARGV[0])
+    bytes = File.binread(inputfile)
   end
   
   terminal = Terminal.new(bytes)
   screen = terminal.simulate
-  
-  print terminal.text("\r\n")
+
+  text = terminal.text("\r\n")
+  if option[:extension] and inputfile
+    File.open(inputfile + option[:extension], 'wb') {|f|
+      f.write(text)
+    }
+  else
+    print terminal.text("\r\n")
+  end
 end
 
 if __FILE__ == $0
