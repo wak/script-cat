@@ -224,7 +224,7 @@ module Sequence
         break if bytes.last.match(/[@A-Za-z\[\]^_`{|}~]/)
       }
 
-      return CSISequence.new(bytes)
+      return CSISequence.new(bytes.join)
     end
 
     def parse_DCS
@@ -315,7 +315,9 @@ module Sequence
     attr_reader :final_byte, :params
     
     def initialize(bytes)
-      @bytes = bytes.join
+      @bytes = bytes
+
+      bytes = bytes.each_char.to_a
       @final_byte = bytes.pop
       
       @private_param = nil
