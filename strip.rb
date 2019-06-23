@@ -546,43 +546,87 @@ module Sequence
   end
 end
 
-def parse_option
-  option = {}
+def usage
+  STDERR.puts 'usage: ruby strip.rb [-i suffix] [input file]'
+  exit
+end
 
+def parse_config
+  config = {
+    :extension        => nil,
+    :linefeed_code    => "\n",
+    :input_file       => nil,
+  }
+
+  input_file_need = false
+  
   parser = GetoptLong.new
-  parser.set_options(['-i', GetoptLong::REQUIRED_ARGUMENT])
+  parser.set_options([          '-i', GetoptLong::REQUIRED_ARGUMENT],
+                     ['--crlf'      , GetoptLong::NO_ARGUMENT],
+                     ['--lf'        , GetoptLong::NO_ARGUMENT],
+                     ['--help', '-h', GetoptLong::NO_ARGUMENT])
   parser.each_option do |name, arg|
     case name
     when '-i'
-      option[:extension] = arg
+      config[:extension] = arg
+      input_file_need = true
+
+    when '--crlf'
+      config[:linefeed_code] = "\r\n"
+      
+    when '--lf'
+      config[:linefeed_code] = "\n"
+
+    when '--help'
+      usage
     end
   end
-  return option
-end
 
-def main
-  option = parse_option
-  inputfile = ARGV[0]
-  out = STDOUT
+  unless ARGV.empty?
+    config[:input_file] = ARGV.shift
+  end
 
-  if inputfile.nil?
-    STDIN.binmode
-    bytes = STDIN.read
-  else
-    bytes = File.binread(inputfile)
+  if input_file_need && config[:input_file].nil?
+    STDERR.puts('input file required.')
+    usage
   end
   
-  terminal = Terminal.new(bytes)
-  screen = terminal.simulate
+  return config
+    
+rescue GetoptLong::InvalidOption
+  usage
+end
 
-  text = terminal.text("\r\n")
-  if option[:extension] and inputfile
-    File.open(inputfile + option[:extension], 'wb') {|f|
+def read_input(config)
+  if config[:input_file]
+    return File.binread(config[:input_file])
+  else
+    STDIN.binmode
+    return STDIN.read
+  end
+end
+
+def output(terminal, config)
+  text = terminal.text(config[:linefeed_code])
+  
+  if config[:extension]
+    outputfile = config[:input_file] + config[:extension]
+    File.open(outputfile, 'wb') {|f|
       f.write(text)
     }
   else
-    print terminal.text("\r\n")
+    STDOUT.write(text)
   end
+end
+
+def main
+  config = parse_config
+
+  bytes = read_input(config)
+  terminal = Terminal.new(bytes)
+  screen = terminal.simulate
+
+  output(terminal, config)
 end
 
 if __FILE__ == $0
