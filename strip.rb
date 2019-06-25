@@ -547,7 +547,7 @@ module Sequence
 end
 
 def usage
-  STDERR.puts 'usage: ruby strip.rb [-i suffix] [input file]'
+  STDERR.puts 'usage: ruby strip.rb [-i suffix] [--crlf] [input files ...]'
   exit
 end
 
@@ -555,7 +555,7 @@ def parse_config
   config = {
     :extension        => nil,
     :linefeed_code    => "\n",
-    :input_file       => nil,
+    :input_files      => nil,
   }
 
   input_file_need = false
@@ -583,10 +583,10 @@ def parse_config
   end
 
   unless ARGV.empty?
-    config[:input_file] = ARGV.shift
+    config[:input_files] = ARGV.dup
   end
 
-  if input_file_need && config[:input_file].nil?
+  if input_file_need && config[:input_files].nil?
     STDERR.puts('input file required.')
     usage
   end
@@ -597,20 +597,26 @@ rescue GetoptLong::InvalidOption
   usage
 end
 
-def read_input(config)
-  if config[:input_file]
-    return File.binread(config[:input_file])
-  else
-    STDIN.binmode
-    return STDIN.read
+def strip_stream(stream, config)
+  unless stream.binmode?
+    stream.binmode
   end
+  bytes = stream.read
+  terminal = Terminal.new(bytes)
+  terminal.simulate
+  text = terminal.text(config[:linefeed_code])
+
+  STDOUT.write(text)
 end
 
-def output(terminal, config)
+def strip_file(filename, config)
+  bytes = File.binread(filename)
+  terminal = Terminal.new(bytes)
+  terminal.simulate
   text = terminal.text(config[:linefeed_code])
-  
+
   if config[:extension]
-    outputfile = config[:input_file] + config[:extension]
+    outputfile = filename + config[:extension]
     File.open(outputfile, 'wb') {|f|
       f.write(text)
     }
@@ -622,11 +628,13 @@ end
 def main
   config = parse_config
 
-  bytes = read_input(config)
-  terminal = Terminal.new(bytes)
-  screen = terminal.simulate
-
-  output(terminal, config)
+  if config[:input_files]
+    config[:input_files].each {|file|
+      strip_file(file, config)
+    }
+  else
+    strip_stream(STDIN, config)
+  end
 end
 
 if __FILE__ == $0
