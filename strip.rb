@@ -12,6 +12,11 @@ class Screen
     @alternative_screen_buffer = false
     @bracketed_paste_mode = false
   end
+
+  def previous
+    return nil if @column == 0
+    return @screen[@row][@column]
+  end
   
   def down(n)
     return if @alternative_screen_buffer
@@ -266,6 +271,10 @@ module Sequence
         screen.down(1)
 
       when "\r"
+        if screen.previous == ' '
+          # 行末による折返し
+          screen.down(1)
+        end
         screen.move_column(1)
         
       when "\b"
