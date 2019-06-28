@@ -17,10 +17,10 @@ class Screen
     return nil if @column == 0
     return @screen[@row][@column]
   end
-  
+
   def down(n)
     return if @alternative_screen_buffer
-    
+
     @row.upto(@row + n) {|n|
       @screen[n] = [] if @screen.size <= n
     }
@@ -29,50 +29,50 @@ class Screen
 
   def up(n)
     return if @alternative_screen_buffer
-    
+
     @row = [@row - n, 0].max
   end
 
   def left(n)
     return if @alternative_screen_buffer
-    
+
     @column = [@column - n, 0].max
   end
 
   def right(n)
     return if @alternative_screen_buffer
-    
+
     @column += n
   end
 
   def move(row, column)
     return if @alternative_screen_buffer
-    
+
     @row = [row - 1, 0].max
     @column = [column - 1, 0].max
   end
 
   def move_column(column)
     return if @alternative_screen_buffer
-    
+
     @column = [column - 1, 0].max
   end
 
   def move_to_last_row
     return if @alternative_screen_buffer
-    
+
     @row = @screen.size - 1
   end
 
   def erase_right
     return if @alternative_screen_buffer
-    
+
     @screen[@row] = @screen[@row][0...@column]
   end
 
   def erase_left
     return if @alternative_screen_buffer
-    
+
     0.upto(@column) {|i|
       @screen[@row][i] = nil
     }
@@ -80,13 +80,13 @@ class Screen
 
   def erase_line
     return if @alternative_screen_buffer
-    
+
     @screen[@row] = []
   end
 
   def write_char(c)
     return if @alternative_screen_buffer
-    
+
     @screen[@row][@column] = c
     @column += 1
   end
@@ -94,7 +94,7 @@ class Screen
   def turn_on_bracketed_paste_mode
     @bracketed_paste_mode = true
   end
-  
+
   def turn_off_bracketed_paste_mode
     @bracketed_paste_mode = false
   end
@@ -102,12 +102,12 @@ class Screen
   def turn_on_alternative_screen_buffer
     # Alternative Screen Buffer 有効時の出力はすべて破棄する。
     # テキストエディタでの編集時にASBが有効になる。
-    # 
+    #
     # 値を残したい場合は、grepやdiffで確認すること。
-    
+
     @alternative_screen_buffer = true
   end
-  
+
   def turn_off_alternative_screen_buffer
     @alternative_screen_buffer = false
   end
@@ -118,10 +118,10 @@ class Screen
 
   def text(newline = "\n")
     result = @screen.map {|r| r.map{|c| c || ' ' }.join.rstrip }
-    
+
     return '' if result.empty?
     result.delete_at(0) while !result.empty? and result[0].strip.empty?
-    
+
     return '' if result.empty?
     result.delete_at(-1) while !result.empty? and result[-1].strip.empty?
 
@@ -158,10 +158,10 @@ class ByteReader
   def eof?
     @position >= @text.size
   end
-  
+
   def getc
     return nil if eof?
-    
+
     @current = @text[@position]
     @position += 1
 
@@ -177,21 +177,23 @@ module Sequence
 
     def read
       return nil if @input.eof?
-      
+
       c = @input.getc
-      
+
       if c == "\e"                 # 0x1b
         return read_escape_sequence
       else
         return SingleSequence.new(c)
       end
     end
-    
+
     private
 
     def read_escape_sequence
       case c = @input.getc
       when '['
+        # ESC [
+        # Control Sequence Introducer (CSI  is 0x9b).
         return parse_CSI
 
       when 'P'
@@ -209,7 +211,7 @@ module Sequence
         # XTERM sequence (OSC)
         return IgnoredSequence.new(c)
 
-        
+
       when '\\'
         # ?
         return IgnoredSequence.new(c)
@@ -234,24 +236,34 @@ module Sequence
 
     def parse_DCS
       # Device Control Sequence
-      
+
       case c = @input.getc
       when '+'
-        d = []
-        5.times { d << @input.getc }
-        
-        return DCSSequence.new(d.join)
+        # DCS + p Pt ST
+        return DCSSequence.new(read_until_ST.join)
 
       when '$'
-        # 書式が正しいかわからない。
-        d = []
-        3.times { d << @input.getc }
-        
-        return DCSSequence.new(d.join)
-        
+        # DCS $ q Pt ST
+        return DCSSequence.new(read_until_ST.join)
+
       else
         STDERR.puts "unsupported DCS sequence (#{c})"
       end
+    end
+
+    def read_until_ST
+      data = []
+
+      c1 = c2 = nil
+      while c2 = @input.getc
+        data << c2
+
+        if c1 == "\x1b" and (c2 == '\\' or c2 == "\x9c")
+          break
+        end
+        c1 = c2
+      end
+      return data
     end
   end
 
@@ -276,7 +288,7 @@ module Sequence
           screen.down(1)
         end
         screen.move_column(1)
-        
+
       when "\b"
         screen.left(1)
 
@@ -294,22 +306,22 @@ module Sequence
     def initialize(type)
       @sequence_type = type
     end
-    
+
     def inspect
       "#<Sequence IGN type='#{@sequence_type}'>"
     end
   end
-  
+
   class UnknownSequence < SequenceBase
     def initialize(type)
       @sequence_type = type
     end
-    
+
     def inspect
       "#<Sequence ??? type='#{@sequence_type}'>"
     end
   end
-  
+
   class DCSSequence < SequenceBase
     def initialize(param)
       @param = param
@@ -319,16 +331,16 @@ module Sequence
       "#<Sequence DCS param=#{@param.inspect}>"
     end
   end
-  
+
   class CSISequence < SequenceBase
     attr_reader :final_byte, :params
-    
+
     def initialize(bytes)
       @bytes = bytes
 
       bytes = bytes.each_char.to_a
       @final_byte = bytes.pop
-      
+
       @private_param = nil
       if bytes.first and bytes.first.match(/[<=>?]/)
         @private_param = bytes.shift
@@ -344,7 +356,7 @@ module Sequence
 
     def simulate(screen)
       @screen = screen
-      
+
       case @final_byte
       when 'K'
         simulate_erase_line
@@ -366,19 +378,19 @@ module Sequence
 
       when 'A'                  # Cursor Up
         @screen.up(@params[0] || 1)
-        
+
       when 'B'                  # Cursor Down
         @screen.down(@params[0] || 1)
-        
+
       when 'C'                  # Cursor Forward
         @screen.right(@params[0] || 1)
-        
+
       when 'D'                  # Cursor Back
         @screen.left(@params[0] || 1)
 
       when 'h'
         simulate_h
-        
+
       when 'l'
         simulate_l
 
@@ -387,7 +399,7 @@ module Sequence
 
       when 'c'                  # DA2 (Secondary DA) ?
         # skip
-        
+
       when 'r', 'n', '=', '>'
         # skip
 
@@ -397,7 +409,7 @@ module Sequence
     end
 
     private
-    
+
     def notify_unsupported_sequence
       STDERR.puts("unsupported CSI sequence (#{self.inspect})")
     end
@@ -430,7 +442,7 @@ module Sequence
           return
         end
       end
-      
+
       notify_unsupported_sequence
     end
 
@@ -456,13 +468,13 @@ module Sequence
         when 12
           # カーソルを点灯(非点滅)状態にする(?)
           return
-          
+
         when 25
           # DECTCEM: カーソルを非表示にする。
           return
         end
       end
-      
+
       notify_unsupported_sequence
     end
 
@@ -474,7 +486,7 @@ module Sequence
 
       notify_unsupported_sequence
     end
-    
+
     def simulate_erase_line
       case @params[0]
       when 0
@@ -493,16 +505,20 @@ module Sequence
 
     def simulate_erase_screen
       case @params[0]
-      when 0
-        # ?
-        @screen.down(10)
-        
+      when nil, 0
+        # Erase Below (default).
+        @screen.move_to_last_row
+
       when 1
         # Erase characters from home to cursor
         @screen.down(10)
 
       when 2
         # Erase screen (scroll out)
+        @screen.down(10)
+
+      when 3
+        # Erase Saved Lines (xterm).
         @screen.down(10)
       end
     end
@@ -512,7 +528,7 @@ module Sequence
       when 0
         # 画面をクリアするときに発生するっぽい。
         @screen.down(1)
-        
+
       when 2
         # $1行目の$2文字目にカーソルを移動する。
         # エディタ等を使用しなければ、画面は下に流れるだけのはず。
@@ -536,7 +552,7 @@ module Sequence
     def simulate_delete_n_line
       # 下N行を削除する。
       # データを残すため、何もしない。
-      # 
+      #
       # 改行時に発生する。
       # エスケープシーケンスの流れとしては、1M → 1L となり、
       # 何もないはずの次の一行を削除してから、新しい行を挿入する…というような流れ。
@@ -549,7 +565,7 @@ module Sequence
 
     def simulate_CUF
       # Cursor Forward
-      
+
       @screen.right(@params[0] || 1)
     end
   end
@@ -568,7 +584,7 @@ def parse_config
   }
 
   input_file_need = false
-  
+
   parser = GetoptLong.new
   parser.set_options([          '-i', GetoptLong::REQUIRED_ARGUMENT],
                      ['--crlf'      , GetoptLong::NO_ARGUMENT],
@@ -582,7 +598,7 @@ def parse_config
 
     when '--crlf'
       config[:linefeed_code] = "\r\n"
-      
+
     when '--lf'
       config[:linefeed_code] = "\n"
 
@@ -599,9 +615,9 @@ def parse_config
     STDERR.puts('input file required.')
     usage
   end
-  
+
   return config
-    
+
 rescue GetoptLong::InvalidOption
   usage
 end
