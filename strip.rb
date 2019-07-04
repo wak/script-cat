@@ -87,7 +87,7 @@ class Screen
   def write_char(c)
     return if @alternative_screen_buffer
 
-    @screen[@row][@column] = c
+    @screen[@row][@column] = c.ord
     @column += 1
   end
 
@@ -117,7 +117,7 @@ class Screen
   end
 
   def text(newline = "\n")
-    result = @screen.map {|r| r.map{|c| c || ' ' }.join.rstrip }
+    result = @screen.map {|r| r.map{|c| c || ' '.ord }.pack('C*').rstrip }
 
     return '' if result.empty?
     result.delete_at(0) while !result.empty? and result[0].strip.empty?
@@ -588,6 +588,9 @@ def parse_config
   parser = GetoptLong.new
   parser.set_options([          '-i', GetoptLong::REQUIRED_ARGUMENT],
                      ['--crlf'      , GetoptLong::NO_ARGUMENT],
+                     ['--utf8'      , GetoptLong::NO_ARGUMENT],
+                     ['--sjis'      , GetoptLong::NO_ARGUMENT],
+                     ['--eucjp'     , GetoptLong::NO_ARGUMENT],
                      ['--lf'        , GetoptLong::NO_ARGUMENT],
                      ['--help', '-h', GetoptLong::NO_ARGUMENT])
   parser.each_option do |name, arg|
@@ -598,6 +601,15 @@ def parse_config
 
     when '--crlf'
       config[:linefeed_code] = "\r\n"
+
+    when '--sjis'
+      config[:encoding] = Encoding::Shift_JIS
+
+    when '--utf8'
+      config[:encoding] = Encoding::UTF_8
+
+    when '--eucjp'
+      config[:encoding] = Encoding::EUC_JP
 
     when '--lf'
       config[:linefeed_code] = "\n"
@@ -622,6 +634,17 @@ rescue GetoptLong::InvalidOption
   usage
 end
 
+def make_result(terminal, config)
+  text = terminal.text(config[:linefeed_code])
+
+  if config[:encoding]
+    text = text.force_encoding(config[:encoding])
+    text = text.encode(Encoding.default_external)
+  end
+
+  return text
+end
+
 def strip_stream(stream, config)
   unless stream.binmode?
     stream.binmode
@@ -629,7 +652,7 @@ def strip_stream(stream, config)
   bytes = stream.read
   terminal = Terminal.new(bytes)
   terminal.simulate
-  text = terminal.text(config[:linefeed_code])
+  text = make_result(terminal, config)
 
   STDOUT.write(text)
 end
@@ -638,7 +661,7 @@ def strip_file(filename, config)
   bytes = File.binread(filename)
   terminal = Terminal.new(bytes)
   terminal.simulate
-  text = terminal.text(config[:linefeed_code])
+  text = make_result(terminal, config)
 
   if config[:extension]
     outputfile = filename + config[:extension]
