@@ -1,20 +1,22 @@
-# Terminal Log Formatter
+# Script Cat
 
 ## 概要
-ターミナルエミュレータの制御コードを削除します。
+ターミナルエミュレータのログに含まれる制御コードを削除します。
 
-TeraTermのバイナリログや、scriptコマンドで取得したログを整形します。
+対象とするログは、以下の2種類です。
+  - TeraTermのバイナリログ
+  - scriptコマンドで取得したログ
 
 
 ## 使い方
 - 標準入力から読み込み、標準出力に結果を出力する。
-  - `./strip.rb < a.log`
+  - `./script-cat.rb < a.log`
   
 - ファイルから読み込み、標準出力に結果を出力する。
-  - `./strip.rb a.log`
+  - `./script-cat.rb a.log`
 
 - ファイルから読み込み、ファイル名に追加の拡張子をつけたパスに出力する。
-  - `./strip.rb -i.txt a.log`
+  - `./script-cat.rb -i.txt a.log`
 
 
 ## 補足
