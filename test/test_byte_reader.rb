@@ -1,7 +1,7 @@
 #! /usr/bin/env ruby
 
 require 'test/unit/assertions'
-require 'strip'
+require 'script-cat'
 
 class TC_ByteReader < Test::Unit::TestCase
   def test_getc

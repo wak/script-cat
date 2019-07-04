@@ -2,7 +2,7 @@
 
 require 'test/unit/assertions'
 require "test/unit/rr"
-require 'strip'
+require 'script-cat'
 
 class TC_CSISequence < Test::Unit::TestCase
   def test_erase_line
