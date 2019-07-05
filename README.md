@@ -22,3 +22,7 @@
 ## 補足
 TeraTermのバイナリログの整形は、
 基本的には、ログの再生機能がいいと思います。
+
+```
+start C:\apps\teraterm\ttermpro.exe /R=%1 /NOLOG
+```
