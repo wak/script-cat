@@ -143,6 +143,15 @@ class Terminal
     return @screen
   end
 
+  def mask_text
+    result = []
+
+    while s = @reader.read
+      result << s.masked_sequence
+    end
+    return result.join
+  end
+
   def text(newline = "\n")
     return @screen.text(newline) + newline
   end
@@ -190,39 +199,40 @@ module Sequence
     private
 
     def read_escape_sequence
-      case c = @input.getc
+      rawdata = ["\e", @input.getc]
+      case rawdata.last
       when '['
         # ESC [
-        # Control Sequence Introducer (CSI  is 0x9b).
-        return parse_CSI
+        # Control Sequence Introducer (CSI is 0x9b).
+        return parse_CSI(rawdata)
 
       when 'P'
-        return parse_DCS
+        return parse_DCS(rawdata)
 
       when '='
         # アプリケーションキーパッドモードにセットする(?)
-        return IgnoredSequence.new(c)
+        return IgnoredSequence.new(rawdata)
 
       when '>'
         # 数値キーパッドモードにセットする(?)
-        return IgnoredSequence.new(c)
+        return IgnoredSequence.new(rawdata)
 
       when ']'
         # XTERM sequence (OSC)
-        return IgnoredSequence.new(c)
+        return IgnoredSequence.new(rawdata)
 
 
       when '\\'
         # ?
-        return IgnoredSequence.new(c)
+        return IgnoredSequence.new(rawdata)
 
       else
-        STDERR.puts "unsupported escape sequence (#{c})"
-        return UnknownSequence.new(c)
+        STDERR.puts "unsupported escape sequence (#{rawdata.inspect})"
+        return UnknownSequence.new(rawdata)
       end
     end
 
-    def parse_CSI
+    def parse_CSI(rawdata)
       # CSI - Control Sequence Introducer
 
       bytes = []
@@ -231,20 +241,20 @@ module Sequence
         break if bytes.last.match(/[@A-Za-z\[\]^_`{|}~]/)
       }
 
-      return CSISequence.new(bytes.join)
+      return CSISequence.new((rawdata + bytes).join)
     end
 
-    def parse_DCS
+    def parse_DCS(rawdata)
       # Device Control Sequence
 
       case c = @input.getc
       when '+'
         # DCS + p Pt ST
-        return DCSSequence.new(read_until_ST.join)
+        return DCSSequence.new((rawdata + read_until_ST).join)
 
       when '$'
         # DCS $ q Pt ST
-        return DCSSequence.new(read_until_ST.join)
+        return DCSSequence.new((rawdata + read_until_ST).join)
 
       else
         STDERR.puts "unsupported DCS sequence (#{c})"
@@ -268,13 +278,36 @@ module Sequence
   end
 
   class SequenceBase
+    attr_reader :sequence
+
+    def initialize(sequence)
+      @sequence = sequence
+    end
+
     def simulate(screen)
+    end
+
+    def masked_simulate(screen)
+      simulate(screen)
+    end
+
+    def masked_sequence
+      return sequence
+    end
+
+    def inspect
+      "#<#{_name} seq=#{@sequence.inspect}>"
     end
   end
 
   class SingleSequence < SequenceBase
     def initialize(c)
+      super([c])
       @character = c
+    end
+
+    def _name
+      'C'
     end
 
     def simulate(screen)
@@ -297,8 +330,20 @@ module Sequence
       end
     end
 
-    def inspect
-      "#<Sequence C c=#{@character.inspect}>"
+    def simulate_mask
+      if ["\n", "\r", "\b", ' '].include?(@character)
+        simulate(screen)
+      else
+        return 'x'
+      end
+    end
+
+    def masked_sequence
+      if ["\n", "\r", "\b", ' '].include?(@character)
+        return @character
+      else
+        return 'x'
+      end
     end
   end
 
@@ -307,38 +352,38 @@ module Sequence
       @sequence_type = type
     end
 
-    def inspect
-      "#<Sequence IGN type='#{@sequence_type}'>"
+    def _name
+      'IGN'
     end
   end
 
   class UnknownSequence < SequenceBase
-    def initialize(type)
-      @sequence_type = type
+    def initialize(sequence)
+      super(sequence)
     end
 
-    def inspect
-      "#<Sequence ??? type='#{@sequence_type}'>"
+    def _name
+      '???'
     end
   end
 
   class DCSSequence < SequenceBase
-    def initialize(param)
-      @param = param
+    def initialize(sequence)
+      super(sequence)
     end
 
-    def inspect()
-      "#<Sequence DCS param=#{@param.inspect}>"
+    def _name
+      'DCS'
     end
   end
 
   class CSISequence < SequenceBase
     attr_reader :final_byte, :params
 
-    def initialize(bytes)
-      @bytes = bytes
+    def initialize(sequence)
+      super(sequence)
 
-      bytes = bytes.each_char.to_a
+      bytes = @sequence[2..-1].each_char.to_a
       @final_byte = bytes.pop
 
       @private_param = nil
@@ -350,8 +395,8 @@ module Sequence
       @screen = nil
     end
 
-    def inspect
-      "#<Sequence CSI bytes=#{@bytes.inspect}>"
+    def _name
+      'CSI'
     end
 
     def simulate(screen)
@@ -479,7 +524,7 @@ module Sequence
     end
 
     def simulate_p
-      if @bytes.include?('$')
+      if @sequence.include?('$')
         # DECRQM
         return
       end
@@ -571,120 +616,129 @@ module Sequence
   end
 end
 
-def usage
-  STDERR.puts 'usage: ruby strip.rb [-i suffix] [--crlf] [input files ...]'
-  exit
-end
+class Application
+  def usage
+    STDERR.puts 'usage: ruby strip.rb [-i suffix] [--crlf] [input files ...]'
+    exit
+  end
 
-def parse_config
-  config = {
-    :extension        => nil,
-    :linefeed_code    => "\n",
-    :input_files      => nil,
-  }
+  def parse_argv
+    @extension = nil
+    @linefeed_code = "\n"
+    @filenames = nil
 
-  input_file_need = false
+    input_file_need = false
 
-  parser = GetoptLong.new
-  parser.set_options([          '-i', GetoptLong::REQUIRED_ARGUMENT],
-                     ['--crlf'      , GetoptLong::NO_ARGUMENT],
-                     ['--utf8'      , GetoptLong::NO_ARGUMENT],
-                     ['--sjis'      , GetoptLong::NO_ARGUMENT],
-                     ['--eucjp'     , GetoptLong::NO_ARGUMENT],
-                     ['--lf'        , GetoptLong::NO_ARGUMENT],
-                     ['--help', '-h', GetoptLong::NO_ARGUMENT])
-  parser.each_option do |name, arg|
-    case name
-    when '-i'
-      config[:extension] = arg
-      input_file_need = true
+    parser = GetoptLong.new
+    parser.set_options([          '-i', GetoptLong::REQUIRED_ARGUMENT],
+                       ['--crlf'      , GetoptLong::NO_ARGUMENT],
+                       ['--utf8'      , GetoptLong::NO_ARGUMENT],
+                       ['--sjis'      , GetoptLong::NO_ARGUMENT],
+                       ['--eucjp'     , GetoptLong::NO_ARGUMENT],
+                       ['--lf'        , GetoptLong::NO_ARGUMENT],
+                       ['--mask'      , GetoptLong::NO_ARGUMENT],
+                       ['--help', '-h', GetoptLong::NO_ARGUMENT])
+    parser.each_option do |name, arg|
+      case name
+      when '-i'
+        @extension = arg
+        input_file_need = true
 
-    when '--crlf'
-      config[:linefeed_code] = "\r\n"
+      when '--crlf'
+        @linefeed_code = "\r\n"
 
-    when '--sjis'
-      config[:encoding] = Encoding::Shift_JIS
+      when '--sjis'
+        @encoding = Encoding::Shift_JIS
 
-    when '--utf8'
-      config[:encoding] = Encoding::UTF_8
+      when '--utf8'
+        @encoding = Encoding::UTF_8
 
-    when '--eucjp'
-      config[:encoding] = Encoding::EUC_JP
+      when '--eucjp'
+        @encoding = Encoding::EUC_JP
 
-    when '--lf'
-      config[:linefeed_code] = "\n"
+      when '--lf'
+        @linefeed_code = "\n"
 
-    when '--help'
+      when '--mask'
+        @maskmode = true
+
+      when '--help'
+        usage
+      end
+    end
+
+    unless ARGV.empty?
+      @filenames = ARGV.dup
+    end
+
+    if input_file_need && @filenames.nil?
+      STDERR.puts('input file required.')
       usage
     end
-  end
 
-  unless ARGV.empty?
-    config[:input_files] = ARGV.dup
-  end
-
-  if input_file_need && config[:input_files].nil?
-    STDERR.puts('input file required.')
+  rescue GetoptLong::InvalidOption
     usage
   end
 
-  return config
+  def make_result(bytes)
+    terminal = Terminal.new(bytes)
 
-rescue GetoptLong::InvalidOption
-  usage
-end
+    if @maskmode
+      text = terminal.mask_text
+    else
+      terminal.simulate
+      text = terminal.text(@linefeed_code)
+      if @encoding
+        text = text.force_encoding(@encoding)
+        text = text.encode(Encoding.default_external)
+      end
+    end
 
-def make_result(terminal, config)
-  text = terminal.text(config[:linefeed_code])
-
-  if config[:encoding]
-    text = text.force_encoding(config[:encoding])
-    text = text.encode(Encoding.default_external)
+    return text
   end
 
-  return text
-end
-
-def strip_stream(stream, config)
-  unless stream.binmode?
-    stream.binmode
+  def read_stream(stream)
+    unless stream.binmode?
+      stream.binmode
+    end
+    return stream.read
   end
-  bytes = stream.read
-  terminal = Terminal.new(bytes)
-  terminal.simulate
-  text = make_result(terminal, config)
 
-  STDOUT.write(text)
-end
+  def write_result(text)
+    if @extension
+      outputfile = @filename + @extension
+      File.open(outputfile, 'wb') {|f|
+        f.write(text)
+      }
+    else
+      STDOUT.write(text)
+    end
+  end
 
-def strip_file(filename, config)
-  bytes = File.binread(filename)
-  terminal = Terminal.new(bytes)
-  terminal.simulate
-  text = make_result(terminal, config)
+  def cat_stream
+    text = make_result(read_stream(STDIN))
+    write_result(text)
+  end
 
-  if config[:extension]
-    outputfile = filename + config[:extension]
-    File.open(outputfile, 'wb') {|f|
-      f.write(text)
+  def cat_files
+    @filenames.each {|filename|
+      @filename = filename
+      text = make_result(File.binread(filename))
+      write_result(text)
     }
-  else
-    STDOUT.write(text)
   end
-end
 
-def main
-  config = parse_config
+  def run
+    parse_argv
 
-  if config[:input_files]
-    config[:input_files].each {|file|
-      strip_file(file, config)
-    }
-  else
-    strip_stream(STDIN, config)
+    if @filenames
+      cat_files
+    else
+      cat_stream
+    end
   end
 end
 
 if __FILE__ == $0
-  main
+  Application.new.run
 end
