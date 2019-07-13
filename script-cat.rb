@@ -21,8 +21,8 @@ class Screen
   def down(n)
     return if @alternative_screen_buffer
 
-    @row.upto(@row + n) {|n|
-      @screen[n] = [] if @screen.size <= n
+    @row.upto(@row + n) {|newrow|
+      @screen[newrow] = [] if @screen.size <= newrow
     }
     @row = @row + n
   end
