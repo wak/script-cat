@@ -45,6 +45,25 @@ class Screen
     @column += n
   end
 
+  def delete(n)
+    return if @alternative_screen_buffer
+
+    n.times {
+      @screen[@row].delete_at(@column)
+    }
+  end
+
+  def insert(n, byte = ' ')
+    if byte.is_a?(String)
+      byte = byte[0].ord
+    end
+
+    # カーソルは移動する？しない？
+    n.times {
+      @screen[@row].insert(@column, byte)
+    }
+  end
+
   def move(row, column)
     return if @alternative_screen_buffer
 
@@ -209,6 +228,12 @@ module Sequence
       when 'P'
         return parse_DCS(rawdata)
 
+      when 'M'
+        # Move the active position to the same horizontal position on
+        # the preceding line. If the active position is at the top
+        # margin, a scroll down is performed.
+        return IgnoredSequence.new(rawdata)
+
       when '='
         # アプリケーションキーパッドモードにセットする(?)
         return IgnoredSequence.new(rawdata)
@@ -217,14 +242,21 @@ module Sequence
         # 数値キーパッドモードにセットする(?)
         return IgnoredSequence.new(rawdata)
 
-      when ']'
-        # XTERM sequence (OSC)
-        return IgnoredSequence.new(rawdata)
+      when ']', '7', '8', 't'
+        # ] ... XTERM sequence (OSC)
+        # 7 ... Save Cursor (DECSC), VT100.
+        # 8 ... Restore Cursor (DECRC), VT100.
 
+        # 7,8は実装したほうがよい？
+        return IgnoredSequence.new(rawdata)
 
       when '\\'
         # ?
         return IgnoredSequence.new(rawdata)
+
+      when nil
+        STDERR.puts "EOF when reading escape sequence."
+        return UnknownSequence.new(rawdata)
 
       else
         STDERR.puts "unsupported escape sequence (#{rawdata.inspect})"
@@ -238,6 +270,10 @@ module Sequence
       bytes = []
       loop {
         bytes << @input.getc
+        if bytes.last.nil?
+          STDERR.puts "EOF when reading CSI Sequence."
+          return IgnoredSequence.new(rawdata)
+        end
         break if bytes.last.match(/[@A-Za-z\[\]^_`{|}~]/)
       }
 
@@ -324,6 +360,12 @@ module Sequence
 
       when "\b"
         screen.left(1)
+
+      when "\a"                 # bell
+        return
+
+      when "\x0F"               # SI
+        return
 
       else
         screen.write_char(@character)
@@ -442,11 +484,23 @@ module Sequence
       when 'p'
         simulate_p
 
-      when 'c'                  # DA2 (Secondary DA) ?
-        # skip
+      when 'P'
+        simulate_P
 
-      when 'r', 'n', '=', '>'
-        # skip
+      when '@'
+        simulate_AT
+
+      when 'r', 'n', '=', '>', 'c', 't'
+        # c ... DA2 (Secondary DA) ?
+        # t ... xterm uses Extended Window Manager Hints (EWMH) to maximize the window.
+        return
+
+      when 'f'
+        # CSI Ps ; Ps f
+        #   Horizontal and Vertical Position [row;column] (default = [1,1]) (HVP).
+        #
+        # 実装が難しい。無視する。
+        return
 
       else
         notify_unsupported_sequence
@@ -530,6 +584,20 @@ module Sequence
       end
 
       notify_unsupported_sequence
+    end
+
+    def simulate_P
+      # CSI Ps P  Delete Ps Character(s) (default = 1) (DCH).
+      nr_delete = (@params[0] || 1)
+
+      @screen.delete(nr_delete)
+    end
+
+    def simulate_AT
+      # CSI Ps @  Insert Ps (Blank) Character(s) (default = 1) (ICH).
+      nr_insert = (@params[0] || 1)
+
+      @screen.insert(nr_insert)
     end
 
     def simulate_erase_line
@@ -626,6 +694,8 @@ class Application
     @extension = nil
     @linefeed_code = "\n"
     @filenames = nil
+    @encoding = Encoding::UTF_8
+    @maskmode = false
 
     input_file_need = false
 
@@ -723,6 +793,8 @@ class Application
   def cat_files
     @filenames.each {|filename|
       @filename = filename
+
+      dputs "loading #{filename} ..."
       text = make_result(File.binread(filename))
       write_result(text)
     }
@@ -736,6 +808,12 @@ class Application
     else
       cat_stream
     end
+  end
+end
+
+def dputs(message)
+  if $DEBUG
+    STDERR.puts message
   end
 end
 

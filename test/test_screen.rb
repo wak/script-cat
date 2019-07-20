@@ -41,4 +41,19 @@ class TC_Screen < Test::Unit::TestCase
     
     assert_equal '    efghijklmn', @screen.text
   end
+
+  def test_insert
+    @screen.write_char('a')
+    @screen.insert(5, 'x')
+    @screen.write_char('b')
+
+    assert_equal 'abxxxx', @screen.text
+  end
+
+  def test_delete
+    'aaxxxxx'.each_char {|c| @screen.write_char(c) }
+    @screen.left(5)
+    @screen.delete(5)
+    assert_equal 'aa', @screen.text
+  end
 end
